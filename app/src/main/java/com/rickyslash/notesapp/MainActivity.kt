@@ -1,12 +1,122 @@
 package com.rickyslash.notesapp
 
+import android.content.Intent
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.view.View
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.snackbar.Snackbar
+import com.rickyslash.notesapp.databinding.ActivityMainBinding
+import com.rickyslash.notesapp.db.NoteHelper
+import com.rickyslash.notesapp.entity.Note
+import com.rickyslash.notesapp.helper.MappingHelper
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
+
+    private lateinit var binding: ActivityMainBinding
+    private lateinit var adapter: NoteAdapter
+
+    val resultLauncher: ActivityResultLauncher<Intent> = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.data != null) {
+            when (result.resultCode) {
+                NoteAddUpdateActivity.RESULT_ADD -> {
+                    val note = result.data?.getParcelableExtra<Note>(NoteAddUpdateActivity.EXTRA_NOTE) as Note
+                    adapter.addItem(note)
+                    binding.rvNotes.smoothScrollToPosition(adapter.itemCount - 1)
+                    showSnackbarMessage("1 item successfully added")
+                }
+                NoteAddUpdateActivity.RESULT_UPDATE -> {
+                    val note = result.data?.getParcelableExtra<Note>(NoteAddUpdateActivity.EXTRA_NOTE) as Note
+                    val position = result?.data?.getIntExtra(NoteAddUpdateActivity.EXTRA_POSITION, 0) as Int
+                    adapter.updateItem(position, note)
+                    binding.rvNotes.smoothScrollToPosition(position)
+                    showSnackbarMessage("1 item successfully updated")
+                }
+                NoteAddUpdateActivity.RESULT_DELETE -> {
+                    val position = result?.data?.getIntExtra(NoteAddUpdateActivity.EXTRA_POSITION, 0) as Int
+                    adapter.removeItem(position)
+                    showSnackbarMessage("1 item successfully deleted")
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        supportActionBar?.title = "My Notes"
+
+        binding.rvNotes.layoutManager = LinearLayoutManager(this)
+        binding.rvNotes.setHasFixedSize(true)
+
+        adapter = NoteAdapter(object : NoteAdapter.OnItemClickCallback {
+            override fun onItemClicked(selectedNote: Note?, position: Int?) {
+                val intent = Intent(this@MainActivity, NoteAddUpdateActivity::class.java)
+                intent.putExtra(NoteAddUpdateActivity.EXTRA_NOTE, selectedNote)
+                intent.putExtra(NoteAddUpdateActivity.EXTRA_POSITION, position)
+                resultLauncher.launch(intent)
+            }
+        })
+
+        binding.rvNotes.adapter = adapter
+
+        binding.fabAdd.setOnClickListener {
+            val intent = Intent(this@MainActivity, NoteAddUpdateActivity::class.java)
+            resultLauncher.launch(intent)
+        }
+
+        if (savedInstanceState == null) {
+            loadNotesAsync()
+        } else {
+            val list = savedInstanceState.getParcelableArrayList<Note>(EXTRA_STATE)
+            if (list != null) {
+                adapter.listNotes = list
+            }
+        }
+    }
+
+    private fun showSnackbarMessage(message: String) {
+        Snackbar.make(binding.rvNotes, message, Snackbar.LENGTH_SHORT).show()
+    }
+
+    private fun loadNotesAsync() {
+        lifecycleScope.launch {
+            binding.progressbar.visibility = View.VISIBLE
+            val noteHelper = NoteHelper.getInstance(applicationContext)
+            noteHelper.open()
+            val deferredNotes = async(Dispatchers.IO) {
+                val cursor = noteHelper.queryAll()
+                MappingHelper.mapCursorToArrayList(cursor)
+            }
+            binding.progressbar.visibility = View.INVISIBLE
+            val notes = deferredNotes.await()
+            if (notes.size > 0) {
+                adapter.listNotes = notes
+            } else {
+                adapter.listNotes = ArrayList()
+                showSnackbarMessage("Create some note!")
+            }
+            noteHelper.close()
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putParcelableArrayList(EXTRA_STATE, adapter.listNotes)
+    }
+
+    companion object {
+        private const val EXTRA_STATE = "EXTRA_STATE"
     }
 }
 
@@ -125,7 +235,7 @@ val newRowId = db.insert(BookColumns.TABLE_NAME, null, values)
 
 // Note: provide non-null values for at least one of the columns for 'nullColumnHack', to 'prevent row can't be inserted to database' when 'there is null value'
 // when 'nullColumnHack' is only being passed 'null', when 'null' value is inserted, the 'primary key value' (often '_id') will be passed 'null'. This will leads to an error
-// passing 'another column' as a 'hack' will fix this. example: '.insert(BookColums.TABLE_NAME, BookColumns.COLUMN_NAME_GENRE, values)'
+// passing 'another column' as a 'hack' will fix this. example: '.insert(BookColumns.TABLE_NAME, BookColumns.COLUMN_NAME_GENRE, values)'
 
 // READ (get data) could be done using 'query()' or 'rawQuery()' method
 // - the output of both methods is 'cursor object'
@@ -163,7 +273,7 @@ var c = db.query(
 // - to get data from the 'cursor object' could be done like this:
 /*
 cursor.moveToFirst()
-val itemId = cursor.getInt(cursor.getColumnIndexOrThrow(BookColums._ID))
+val itemId = cursor.getInt(cursor.getColumnIndexOrThrow(BookColumns._ID))
 */
 
 // to pass all 'object cursor' item to ArrayList:
@@ -183,7 +293,7 @@ if (cursor.count()>0) {
 */
 
 // rawQuery: a way to do query inline example: (to get all column by descending order):
-// - database.rawQuery("SELECT * FROM ${BookColums.TABLE_NAME} ORDER BY ${BookColums.COLUMN_NAME_PAGES} DESC", null)
+// - database.rawQuery("SELECT * FROM ${BookColumns.TABLE_NAME} ORDER BY ${BookColumns.COLUMN_NAME_PAGES} DESC", null)
 
 // UPDATE data inside table:
 /*
@@ -213,7 +323,7 @@ val selection = BookColumns.COLUMN_NAME_AUTHOR + " LIKE ?"
 val selectionArgs = arrayOf("shark")
 
 // 'execute' the 'sql statement'
-db.delete(BookColums.TABLE_NAME, selection, selectionArgs)
+db.delete(BookColumns.TABLE_NAME, selection, selectionArgs)
 */
 
 // SQLiteCipher is one of the 'database security' mechanism that could be implemented
