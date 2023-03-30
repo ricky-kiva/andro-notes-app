@@ -42,17 +42,21 @@ class NoteAdapter(private val onItemClickCallback: OnItemClickCallback): Recycle
 
     fun addItem(note: Note) {
         this.listNotes.add(note)
+        // this will notify the recyclerview that new item is added, then modify the recyclerview
         notifyItemInserted(this.listNotes.size - 1)
     }
 
     fun updateItem(position: Int, note: Note) {
         this.listNotes[position] = note
+        // this will notify the recyclerview that item in 'position' is updated, and it's going to be re-rendered
         notifyItemChanged(position, note)
     }
 
     fun removeItem(position: Int) {
         this.listNotes.removeAt(position)
+        // this will notify the recyclerview that item in 'position' is deleted, then modify the recyclerview
         notifyItemRemoved(position)
+        // this will modify the range of recyclerview from deleted item to the last item
         notifyItemRangeChanged(position, this.listNotes.size)
     }
 
